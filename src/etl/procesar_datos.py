@@ -318,26 +318,42 @@ def main_procesamiento():
     df_total = pd.concat(nuevos_datos, ignore_index=True)
     df_final = corregir_fechas_y_tipos(df_total)
 
-    # 3. Guardado Inteligente (Append) + Resampleo
-    print("[SAVE] Actualizando CSVs (con resampleo)...")
+    # 3. Guardado Directo de Datos Raw (Sin resamplear)
+    print("[SAVE] Actualizando archivos Parquet y CSV con datos RAW directos...")
 
     for subestacion, df_new in df_final.groupby("Subestacion"):
         safe_name = re.sub(r"[^\w\s-]", "", str(subestacion)).strip()
         if not safe_name:
             continue
 
-        # APLICAMOS RESAMPLEO AQUÍ
-        df_new_resampled = resamplear_dataframe(df_new)
-
-        ruta_csv = RUTA_SALIDA / f"{safe_name}_3min.csv"
+        ruta_csv = RUTA_SALIDA / f"{safe_name}_raw.csv"
+        if not RUTA_SALIDA.exists():
+            ruta_csv = RUTA_SALIDA / f"{safe_name}_3min.csv"
 
         if ruta_csv.exists():
-            # Cargar existente
             df_old = pd.read_csv(ruta_csv)
             df_old["Timestamp"] = pd.to_datetime(df_old["Timestamp"])
+            df_combined = pd.concat([df_old, df_new], ignore_index=True)
+            df_combined.drop_duplicates(subset=["Timestamp"], keep="last", inplace=True)
+            df_combined.sort_values("Timestamp", inplace=True)
+        else:
+            df_combined = df_new
 
-            # Concatenar
-            df_combined = pd.concat([df_old, df_new_resampled], ignore_index=True)
+        df_combined["Fecha_Real"] = df_combined["Timestamp"].dt.date
+        cols_meta = ["Subestacion", "Max_Diario_MW", "Hora_Pico_Reg"]
+        for col in [c for c in cols_meta if c in df_combined.columns]:
+            df_combined[col] = df_combined.groupby("Fecha_Real")[col].transform("last")
+
+        df_combined.to_csv(ruta_csv, index=False, encoding="utf-8-sig")
+
+        # Guardar en Parquet (Optimizado)
+        RUTA_SALIDA_PARQUET = PROJECT_ROOT / "data" / "SE_Carga_3min_parquet"
+        RUTA_SALIDA_PARQUET.mkdir(parents=True, exist_ok=True)
+
+        ruta_parquet = RUTA_SALIDA_PARQUET / f"{safe_name}_3min.parquet"
+        if "Hora_Real" in df_combined.columns:
+            df_combined["Hora_Real"] = df_combined["Hora_Real"].astype(str)
+        df_combined.to_parquet(ruta_parquet, index=False)
 
             # Eliminar duplicados (Misma Subestacion y Mismo Timestamp)
             df_combined.drop_duplicates(subset=["Timestamp"], keep="last", inplace=True)

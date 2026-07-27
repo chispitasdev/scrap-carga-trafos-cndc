@@ -137,34 +137,18 @@ def procesar_clima_subestacion(nombre, lat, lon):
         print("[WARN] No hay datos nuevos.")
         return
 
-    # 4. Resamplear lo NUEVO a 3 min
-    df_horario.set_index("Timestamp", inplace=True)
-
-    # Creamos índice de 3 min solo para el pedazo nuevo
-    full_idx = pd.date_range(
-        start=df_horario.index.min(), end=df_horario.index.max(), freq="3min"
-    )
-    df_3min_nuevo = df_horario.reindex(full_idx)
-    try:
-        df_3min_nuevo["Temperatura_C"] = df_3min_nuevo["Temperatura_C"].interpolate(
-            method="pchip"
-        )
-    except Exception:
-        df_3min_nuevo["Temperatura_C"] = df_3min_nuevo["Temperatura_C"].interpolate(
-            method="linear"
-        )
-    df_3min_nuevo.reset_index(inplace=True)
-    df_3min_nuevo.rename(columns={"index": "Timestamp"}, inplace=True)
-    df_3min_nuevo["Subestacion"] = nombre
+    # 4. Procesar lo NUEVO (Raw Horario directo de Open-Meteo)
+    df_nuevo = df_horario.copy()
+    if "Subestacion" not in df_nuevo.columns:
+        df_nuevo["Subestacion"] = nombre
 
     # 5. UNIÓN (MERGE): Pegar Histórico + Nuevo
     if df_historico is not None:
-        df_final = pd.concat([df_historico, df_3min_nuevo], ignore_index=True)
-        # Eliminamos duplicados por si se solapó alguna hora
+        df_final = pd.concat([df_historico, df_nuevo], ignore_index=True)
         df_final.drop_duplicates(subset=["Timestamp"], keep="last", inplace=True)
         df_final.sort_values("Timestamp", inplace=True)
     else:
-        df_final = df_3min_nuevo
+        df_final = df_nuevo
 
     # 6. Guardar
     archivo_salida_parquet = RUTA_CLIMA_PARQUET / f"{nombre}_clima.parquet"
