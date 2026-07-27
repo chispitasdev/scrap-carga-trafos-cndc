@@ -328,7 +328,7 @@ def main_procesamiento(forzar_reproceso=False):
 
         ruta_csv = RUTA_SALIDA / f"{safe_name}_3min.csv"
 
-        if ruta_csv.exists():
+        if ruta_csv.exists() and not forzar_reproceso:
             try:
                 df_old = pd.read_csv(ruta_csv)
                 df_old["Timestamp"] = pd.to_datetime(df_old["Timestamp"])
