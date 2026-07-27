@@ -4,19 +4,18 @@ import time
 import re
 from pathlib import Path
 from datetime import datetime, timedelta
+from src.config import RUTA_DATOS, RUTA_CLIMA
 
 # --- CONFIGURACIÓN ---
-# Definir raíz del proyecto (2 niveles arriba: src/etl -> src -> root)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 RUTA_COORDENADAS = (
     PROJECT_ROOT / "data" / "SUBESTACIONES" / "subestacion_con_coordenadas.csv"
 )
-RUTA_CARGA_PARQUET = PROJECT_ROOT / "data" / "SE_Carga_3min_parquet"
-RUTA_CLIMA_PARQUET = PROJECT_ROOT / "data" / "SE_Clima_3min_parquet"
-RUTA_CLIMA_CSV = PROJECT_ROOT / "data" / "SE_Clima_3min"
+RUTA_CARGA_PARQUET = RUTA_DATOS
+RUTA_CLIMA_PARQUET = RUTA_CLIMA
+RUTA_CLIMA_CSV = PROJECT_ROOT / "data" / "SE_Clima_RAW"
 
-# Crear directorio de salida si no existe
 RUTA_CLIMA_PARQUET.mkdir(parents=True, exist_ok=True)
 RUTA_CLIMA_CSV.mkdir(parents=True, exist_ok=True)
 
@@ -158,7 +157,7 @@ def procesar_clima_subestacion(nombre, lat, lon):
     archivo_salida_csv = RUTA_CLIMA_CSV / f"{nombre}_clima.csv"
     df_final.to_csv(archivo_salida_csv, index=False, encoding="utf-8-sig")
 
-    print(f"Guardado (+{len(df_3min_nuevo)} registros nuevos)")
+    print(f"Guardado (+{len(df_nuevo)} registros nuevos)")
 
 
 def main():

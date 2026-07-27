@@ -5,13 +5,13 @@ import warnings
 import re
 
 from datetime import datetime, timedelta
+from src.config import RUTA_DATOS
 
 # --- CONFIGURACIÓN ---
-# Definir raíz del proyecto (2 niveles arriba: src/etl -> src -> root)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 RUTA_DATOS_RAW = PROJECT_ROOT / "data" / "cndc"
-RUTA_SALIDA = PROJECT_ROOT / "data" / "SE_Carga_3min"
+RUTA_SALIDA = PROJECT_ROOT / "data" / "SE_Carga_RAW"
 ARCHIVO_SUBESTACIONES = (
     PROJECT_ROOT / "data" / "SUBESTACIONES" / "subestacion_con_coordenadas.csv"
 )
@@ -348,8 +348,8 @@ def main_procesamiento(forzar_reproceso=False):
 
         df_combined.to_csv(ruta_csv, index=False, encoding="utf-8-sig")
 
-        # Guardar en Parquet (Optimizado)
-        RUTA_SALIDA_PARQUET = PROJECT_ROOT / "data" / "SE_Carga_3min_parquet"
+        # Guardar en Parquet (Optimizado RAW)
+        RUTA_SALIDA_PARQUET = RUTA_DATOS
         RUTA_SALIDA_PARQUET.mkdir(parents=True, exist_ok=True)
 
         ruta_parquet = RUTA_SALIDA_PARQUET / f"{safe_name}_3min.parquet"
@@ -369,7 +369,7 @@ def verificar_consistencia_parquet():
     Si el CSV es más nuevo que el Parquet (o el Parquet no existe), lo regenera.
     """
     print("[SYNC] Verificando consistencia CSV -> Parquet...")
-    RUTA_SALIDA_PARQUET = PROJECT_ROOT / "data" / "SE_Carga_3min_parquet"
+    RUTA_SALIDA_PARQUET = RUTA_DATOS
     RUTA_SALIDA_PARQUET.mkdir(parents=True, exist_ok=True)
 
     csvs = list(RUTA_SALIDA.glob("*_3min.csv"))
