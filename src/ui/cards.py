@@ -1,22 +1,24 @@
-def generar_html_tarjeta(titulo, valor, unidad, subtitulo, delta_valor, delta_color):
+import streamlit as st
+
+
+def mostrar_tarjeta_metrica(
+    container, titulo, valor, unidad="", subtitulo="", delta=None, help_text=None
+):
     """
-    Genera el HTML para una tarjeta de métrica con estilo oscuro.
+    Renderiza una tarjeta de métrica elegante utilizando ÚNICAMENTE componentes nativos de Streamlit.
     """
-    html = f"""
-    <div style="background-color: #1E1E1E; padding: 10px; border-radius: 5px; border: 1px solid #333;" title="{titulo}">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <p style="color: #888; font-size: 14px; margin: 0;">{titulo}</p>
-            <span style="font-size: 12px; cursor: help;">❔</span>
-        </div>
-        <p style="color: #FFF; font-size: 24px; font-weight: bold; margin: 5px 0;">
-            {valor:.2f} {unidad}
-        </p>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <p style="color: #AAA; font-size: 12px; margin: 0;"> {subtitulo}</p>
-            <span style="color: {delta_color}; font-size: 12px; font-weight: bold;">
-                {delta_valor}
-            </span>
-        </div>
-    </div>
-    """
-    return html
+    with container:
+        with st.container(border=True):
+            if isinstance(valor, (int, float)):
+                valor_fmt = f"{valor:.2f} {unidad}".strip()
+            else:
+                valor_fmt = f"{valor} {unidad}".strip()
+
+            st.metric(
+                label=titulo,
+                value=valor_fmt,
+                delta=delta,
+                help=help_text or subtitulo,
+            )
+            if subtitulo:
+                st.caption(subtitulo)

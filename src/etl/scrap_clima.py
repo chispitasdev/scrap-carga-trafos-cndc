@@ -1,6 +1,7 @@
 import pandas as pd
 import requests
 import time
+import re
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -22,12 +23,20 @@ RUTA_CLIMA_CSV.mkdir(parents=True, exist_ok=True)
 API_URL = "https://archive-api.open-meteo.com/v1/archive"
 
 
+def sanitizar_nombre(nombre):
+    return re.sub(r"[^\w\s-]", "", str(nombre)).strip()
+
+
 def obtener_rango_fechas(nombre_sub):
     """
     Busca el archivo de carga de la subestación para determinar fecha inicio y fin.
     Si no existe, usa un default razonable (ej. últimos 2 años).
     """
-    archivo_carga = RUTA_CARGA_PARQUET / f"{nombre_sub}_3min.parquet"
+    safe_name = sanitizar_nombre(nombre_sub)
+    archivo_carga = RUTA_CARGA_PARQUET / f"{safe_name}_3min.parquet"
+    if not archivo_carga.exists():
+        archivo_carga = RUTA_CARGA_PARQUET / f"{nombre_sub}_3min.parquet"
+
     if archivo_carga.exists():
         try:
             # Leemos solo la columna Timestamp para ser rápidos
@@ -43,7 +52,7 @@ def obtener_rango_fechas(nombre_sub):
             max_date = max_ts.date()
             return min_date, max_date
         except Exception as e:
-            print(f"⚠️ Error leyendo rango de {nombre_sub}: {e}")
+            print(f"[WARN] Error leyendo rango de {nombre_sub}: {e}")
 
     # Default si no hay datos de carga: Últimos 365 días
     hoy = datetime.now().date()
@@ -75,18 +84,23 @@ def descargar_clima(lat, lon, start_date, end_date):
         )
         return df
     except Exception as e:
-        print(f"❌ Error API Open-Meteo: {e}")
+        print(f"[ERROR] Error API Open-Meteo: {e}")
         return None
 
 
 def procesar_clima_subestacion(nombre, lat, lon):
-    print(f"🌦️ Procesando clima para: {nombre}...", end=" ")
+    print(f"[CLIMA] Procesando clima para: {nombre}...", end=" ")
 
     # 1. ¿Hasta cuándo necesitamos datos? (Meta: Fin de los datos de carga eléctrica)
     start_carga, end_carga = obtener_rango_fechas(nombre)
 
+    safe_name = sanitizar_nombre(nombre)
+
     # 2. ¿Desde cuándo descargamos? (Lógica Incremental)
-    archivo_existente = RUTA_CLIMA_PARQUET / f"{nombre}_clima.parquet"
+    archivo_existente = RUTA_CLIMA_PARQUET / f"{safe_name}_clima.parquet"
+    if not archivo_existente.exists():
+        archivo_existente = RUTA_CLIMA_PARQUET / f"{nombre}_clima.parquet"
+
     df_historico = None
     fecha_inicio_descarga = start_carga  # Por defecto: descargamos todo
 
@@ -108,7 +122,7 @@ def procesar_clima_subestacion(nombre, lat, lon):
 
                 # Si nuestra fecha de inicio ya superó la fecha fin de carga, no hacemos nada.
                 if fecha_inicio_descarga > end_carga:
-                    print("✅ Ya está actualizado.")
+                    print("[OK] Ya está actualizado.")
                     return
 
                 print(f"[Incremental: {fecha_inicio_descarga} -> {end_carga}]", end=" ")
@@ -120,7 +134,7 @@ def procesar_clima_subestacion(nombre, lat, lon):
     df_horario = descargar_clima(lat, lon, fecha_inicio_descarga, end_carga)
 
     if df_horario is None or df_horario.empty:
-        print("⚠️ No hay datos nuevos.")
+        print("[WARN] No hay datos nuevos.")
         return
 
     # 4. Resamplear lo NUEVO a 3 min
@@ -131,9 +145,14 @@ def procesar_clima_subestacion(nombre, lat, lon):
         start=df_horario.index.min(), end=df_horario.index.max(), freq="3min"
     )
     df_3min_nuevo = df_horario.reindex(full_idx)
-    df_3min_nuevo["Temperatura_C"] = df_3min_nuevo["Temperatura_C"].interpolate(
-        method="cubic"
-    )
+    try:
+        df_3min_nuevo["Temperatura_C"] = df_3min_nuevo["Temperatura_C"].interpolate(
+            method="pchip"
+        )
+    except Exception:
+        df_3min_nuevo["Temperatura_C"] = df_3min_nuevo["Temperatura_C"].interpolate(
+            method="linear"
+        )
     df_3min_nuevo.reset_index(inplace=True)
     df_3min_nuevo.rename(columns={"index": "Timestamp"}, inplace=True)
     df_3min_nuevo["Subestacion"] = nombre
@@ -160,22 +179,22 @@ def procesar_clima_subestacion(nombre, lat, lon):
 
 def main():
     if not RUTA_COORDENADAS.exists():
-        print(f"❌ No se encontró el archivo de coordenadas: {RUTA_COORDENADAS}")
+        print(f"[ERROR] No se encontró el archivo de coordenadas: {RUTA_COORDENADAS}")
         return
 
     try:
         df_coords = pd.read_csv(RUTA_COORDENADAS)
     except Exception as e:
-        print(f"❌ Error leyendo CSV coordenadas: {e}")
+        print(f"[ERROR] Error leyendo CSV coordenadas: {e}")
         return
 
     # Validar columnas
     required_cols = ["Subestacion", "Latitud", "Longitud"]
     if not all(col in df_coords.columns for col in required_cols):
-        print(f"❌ El CSV debe tener las columnas: {required_cols}")
+        print(f"[ERROR] El CSV debe tener las columnas: {required_cols}")
         return
 
-    print(f"🚀 Iniciando descarga de clima para {len(df_coords)} subestaciones...")
+    print(f"[START] Iniciando descarga de clima para {len(df_coords)} subestaciones...")
 
     for _, row in df_coords.iterrows():
         sub = row["Subestacion"]
@@ -187,7 +206,7 @@ def main():
         # Respetar límites de API (Open-Meteo pide no saturar)
         time.sleep(1.5)
 
-    print("\n✨ ¡Proceso de clima finalizado!")
+    print("\n[DONE] Proceso de clima finalizado.")
 
 
 if __name__ == "__main__":

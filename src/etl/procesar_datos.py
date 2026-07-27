@@ -40,6 +40,26 @@ def cargar_subestaciones_objetivo():
         return None
 
 
+def obtener_fechas_ya_procesadas():
+    """
+    Retorna un conjunto (set) de fechas que ya han sido procesadas
+    y consolidadas en los Parquets de salida.
+    """
+    RUTA_SALIDA_PARQUET = PROJECT_ROOT / "data" / "SE_Carga_3min_parquet"
+    if not RUTA_SALIDA_PARQUET.exists():
+        return set()
+    parquets = list(RUTA_SALIDA_PARQUET.glob("*.parquet"))
+    if not parquets:
+        return set()
+    try:
+        # Leemos el primer Parquet para extraer el set de fechas existentes
+        df_sample = pd.read_parquet(parquets[0], columns=["Timestamp"])
+        fechas = set(pd.to_datetime(df_sample["Timestamp"]).dt.date.unique())
+        return fechas
+    except Exception:
+        return set()
+
+
 def obtener_ultima_fecha_procesada():
     """
     Busca en los CSVs de salida la fecha más reciente procesada.
@@ -49,20 +69,15 @@ def obtener_ultima_fecha_procesada():
         return None
 
     fechas_maximas = []
-    # Escaneamos unos cuantos CSVs para ver dónde nos quedamos
-    # No hace falta leer todos, con ver uno actualizado basta si el proceso es consistente
     csvs = list(RUTA_SALIDA.glob("*.csv"))
 
     if not csvs:
         return None
 
-    print("[SEARCH] Buscando última fecha procesada...")
-    for csv in csvs[:5]:  # Revisamos los primeros 5 para no tardar
+    for csv in csvs[:5]:
         try:
-            # Leemos solo las ultimas filas para ser rápido
             df = pd.read_csv(csv)
             if "Timestamp" in df.columns and not df.empty:
-                # Convertimos a datetime
                 ts = pd.to_datetime(df["Timestamp"]).max()
                 fechas_maximas.append(ts)
         except Exception:
@@ -70,10 +85,6 @@ def obtener_ultima_fecha_procesada():
 
     if fechas_maximas:
         ultima = max(fechas_maximas)
-        # OJO: Si la última fecha es 2024-11-25 00:00:00 (que era el 24:00 del 24),
-        # significa que tenemos datos COMPLETOS hasta el 24.
-        # Pero el archivo del 25 empieza a las 01:00.
-        # Para seguridad, retornamos la fecha base (sin hora)
         return ultima.replace(hour=0, minute=0, second=0)
 
     return None
@@ -233,10 +244,10 @@ def main_procesamiento():
 
     # 1. Cargar Configuración
     target_subs = cargar_subestaciones_objetivo()
-    ultima_fecha = obtener_ultima_fecha_procesada()
+    fechas_existentes = obtener_fechas_ya_procesadas()
 
-    if ultima_fecha:
-        print(f"[DATE] Última fecha detectada: {ultima_fecha.date()}")
+    if fechas_existentes:
+        print(f"[DATE] Detectadas {len(fechas_existentes)} fechas ya presentes en el dataset procesado.")
     else:
         print("[INIT] Procesamiento inicial (desde cero).")
 
@@ -251,16 +262,20 @@ def main_procesamiento():
 
     for carpeta in carpetas:
         try:
-            fecha_carpeta = datetime.strptime(carpeta.name, "%Y-%m-%d")
+            fecha_dt = datetime.strptime(carpeta.name, "%Y-%m-%d")
+            fecha_carpeta = fecha_dt.date()
         except ValueError:
             continue  # Ignorar carpetas que no sean fecha
 
-        # FILTRO INCREMENTAL SEGURO:
-        if ultima_fecha and fecha_carpeta < (ultima_fecha - timedelta(days=2)):
+        # FILTRO INCREMENTAL EXACTO:
+        # Si la fecha de la carpeta ya está en el dataset final, la saltamos.
+        # Si falta (como los 34 días de Diciembre 2025), ¡LA PROCESAMOS!
+        if fechas_existentes and fecha_carpeta in fechas_existentes:
             continue
 
         print(f"   [DIR] Procesando: {carpeta.name}...", end=" ")
 
+        # 1. Archivos zip (formato clásico)
         zips = list(carpeta.glob("*.zip"))
         for zip_file in zips:
             try:
@@ -275,6 +290,22 @@ def main_procesamiento():
                                 nuevos_datos.append(df_part)
             except Exception as e:
                 print(f"[X] Error zip {zip_file.name}: {e}")
+
+        # 2. Archivos Excel directos (.xlsx, .xls) sin comprimir (nuevo formato WordPress)
+        direct_excels = [
+            f for f in carpeta.glob("*")
+            if f.is_file() and f.suffix.lower() in [".xlsx", ".xls"]
+        ]
+        for excel_file in direct_excels:
+            try:
+                with open(excel_file, "rb") as f:
+                    df_part = procesar_excel_a_tidy(
+                        f, carpeta.name, target_subs
+                    )
+                    if df_part is not None:
+                        nuevos_datos.append(df_part)
+            except Exception as e:
+                print(f"[X] Error excel {excel_file.name}: {e}")
 
         print("OK")
         archivos_procesados += 1

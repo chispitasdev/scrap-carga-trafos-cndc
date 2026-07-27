@@ -8,76 +8,94 @@ import time
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 RUTA_BASE = PROJECT_ROOT / "data" / "cndc"
-# URL directa al ZIP. {} se reemplaza por ddmmyy (ej: 251124)
-BASE_URL = "https://www.cndc.bo/media/archivos/boletindiario/deener_{}.zip"
+
+# Patrón 1: WordPress 2026 XLSX directo (sin compresión)
+NEW_BASE_URL = "https://www.cndc.bo/wp-content/uploads/mem/estadisticas/diaria/{year}/{month}/deener_{ddmmyy}.xlsx"
+# Patrón 2: WordPress 2025 ZIP (sin subcarpeta de mes)
+WP_ZIP_2025_URL = "https://www.cndc.bo/wp-content/uploads/mem/estadisticas/diaria/{year}/deener_{ddmmyy}.zip"
+# Patrón 3: Antiguo directo ZIP
+OLD_BASE_URL = "https://www.cndc.bo/media/archivos/boletindiario/deener_{ddmmyy}.zip"
 
 
-def obtener_ultima_fecha_registrada():
-    # 1.Recolectamos los nombres de todas las carpetas
-    carpetas = []
-    for item in RUTA_BASE.iterdir():
-        if item.is_dir():
-            carpetas.append(item.name)
+def obtener_fechas_faltantes_cndc():
+    """
+    Escanea desde 2024-09-01 hasta hoy y retorna una lista de fechas (datetime)
+    cuyas carpetas en data/cndc/ no existen o están vacías.
+    """
+    fecha_inicio = datetime(2024, 9, 1)
+    fecha_fin = datetime.now()
+    cur = fecha_inicio
+    faltantes = []
 
-    # 2.Si no hay carpetas, retornamos None (por seguridad)
-    if not carpetas:
-        return None
+    while cur <= fecha_fin:
+        fecha_dir = RUTA_BASE / cur.strftime("%Y-%m-%d")
+        if not fecha_dir.exists() or not any(fecha_dir.iterdir()):
+            faltantes.append(cur)
+        cur += timedelta(days=1)
 
-    # 3.Obtenemos la más reciente (orden alfabético = cronológico)
-    ultima_carpeta = max(carpetas)
-
-    # 4.Devolvemos la fecha convertida
-    return datetime.strptime(ultima_carpeta, "%Y-%m-%d")
+    return faltantes
 
 
 def descargar_incremental():
-    print("[INFO] ACTUALIZANDO CNDC (MODO DIRECTO)...")
+    print("[INFO] ACTUALIZANDO CNDC (SCANNER DE FECHAS FALTANTES)...")
 
     RUTA_BASE.mkdir(parents=True, exist_ok=True)
 
-    ultima_fecha = obtener_ultima_fecha_registrada()
-    if ultima_fecha is None:
-        # Si es la primera vez, empezamos desde una fecha fija (ej: 1 de Enero 2024)
-        fecha_actual = datetime(2024, 9, 1)
-    else:
-        fecha_actual = ultima_fecha + timedelta(days=1)
+    fechas_a_descargar = obtener_fechas_faltantes_cndc()
+    print(f"[DATE] Detectadas {len(fechas_a_descargar)} fechas pendientes por descargar.")
 
-    print(f"[DATE] Iniciando desde: {fecha_actual.strftime('%Y-%m-%d')}")
+    if not fechas_a_descargar:
+        print("[OK] Todos los días requeridos ya están descargados en data/cndc.")
+        return
 
     session = requests.Session()
-    session.headers.update({"User-Agent": "Mozilla/5.0"})  # Cortesía
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    })
 
-    while fecha_actual <= datetime.now():
-        fecha_str = fecha_actual.strftime("%d%m%y")
-        url = BASE_URL.format(fecha_str)
-        carpeta = RUTA_BASE / fecha_actual.strftime("%Y-%m-%d")
-        archivo = carpeta / f"deener_{fecha_str}.zip"
+    count_ok = 0
 
-        print(f" [DOWN] Probando {fecha_actual.strftime('%Y-%m-%d')}...", end=" ")
+    for fecha_actual in fechas_a_descargar:
+        year_4d = fecha_actual.strftime("%Y")
+        month_2d = fecha_actual.strftime("%m")
+        ddmmyy = fecha_actual.strftime("%d%m%y")
+        fecha_dir = fecha_actual.strftime("%Y-%m-%d")
 
-        try:
-            resp = session.get(url, stream=True, timeout=10)
+        urls_a_probar = [
+            (NEW_BASE_URL.format(year=year_4d, month=month_2d, ddmmyy=ddmmyy), f"deener_{ddmmyy}.xlsx"),
+            (NEW_BASE_URL.format(year=year_4d, month=month_2d, ddmmyy=ddmmyy).replace(".xlsx", ".xls"), f"deener_{ddmmyy}.xls"),
+            (WP_ZIP_2025_URL.format(year=year_4d, ddmmyy=ddmmyy), f"deener_{ddmmyy}.zip"),
+            (OLD_BASE_URL.format(ddmmyy=ddmmyy), f"deener_{ddmmyy}.zip"),
+        ]
 
-            if resp.status_code == 200:
-                carpeta.mkdir(exist_ok=True)
-                with open(archivo, "wb") as f:
-                    for chunk in resp.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                print("[OK]")
-                fecha_actual += timedelta(days=1)
-                time.sleep(0.2)
-            elif resp.status_code == 404:
-                print("[X] Fin (404)")
-                break  # Asumimos que no hay más datos futuros
-            else:
-                print(f"[WARN] Error {resp.status_code}")
-                break
+        descargado = False
 
-        except Exception as e:
-            print(f"[X] Error: {e}")
-            break
+        for url, nombre_archivo in urls_a_probar:
+            try:
+                resp = session.get(url, stream=True, timeout=12)
+                if resp.status_code == 200 and len(resp.content) > 1000:
+                    carpeta = RUTA_BASE / fecha_dir
+                    carpeta.mkdir(exist_ok=True)
+                    archivo_path = carpeta / nombre_archivo
 
-    print("[FIN] Proceso terminado.")
+                    with open(archivo_path, "wb") as f:
+                        f.write(resp.content)
+
+                    print(f" [DOWN] {fecha_dir} -> [OK {nombre_archivo}]")
+                    descargado = True
+                    count_ok += 1
+                    break
+            except Exception:
+                continue
+
+        if not descargado:
+            print(f" [DOWN] {fecha_dir} -> [X No disponible]")
+
+        time.sleep(0.1)
+
+    print(f"[FIN] Descarga de CNDC terminada. Se descargaron {count_ok} días nuevos.")
 
 
 if __name__ == "__main__":
