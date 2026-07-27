@@ -238,18 +238,18 @@ def resamplear_dataframe(df):
     return df_resampled.reset_index()
 
 
-def main_procesamiento():
+def main_procesamiento(forzar_reproceso=False):
     RUTA_SALIDA.mkdir(parents=True, exist_ok=True)
-    print("[START] INICIANDO PROCESAMIENTO INTELIGENTE + RESAMPLEO (3min)...")
+    print("[START] INICIANDO PROCESAMIENTO RAW (SIN RESAMPLEO)...")
 
     # 1. Cargar Configuración
     target_subs = cargar_subestaciones_objetivo()
-    fechas_existentes = obtener_fechas_ya_procesadas()
+    fechas_existentes = set() if forzar_reproceso else obtener_fechas_ya_procesadas()
 
-    if fechas_existentes:
+    if fechas_existentes and not forzar_reproceso:
         print(f"[DATE] Detectadas {len(fechas_existentes)} fechas ya presentes en el dataset procesado.")
     else:
-        print("[INIT] Procesamiento inicial (desde cero).")
+        print("[INIT] Procesamiento RAW desde cero o forzado.")
 
     nuevos_datos = []
     archivos_procesados = 0
@@ -326,18 +326,20 @@ def main_procesamiento():
         if not safe_name:
             continue
 
-        ruta_csv = RUTA_SALIDA / f"{safe_name}_raw.csv"
-        if not RUTA_SALIDA.exists():
-            ruta_csv = RUTA_SALIDA / f"{safe_name}_3min.csv"
+        ruta_csv = RUTA_SALIDA / f"{safe_name}_3min.csv"
 
         if ruta_csv.exists():
-            df_old = pd.read_csv(ruta_csv)
-            df_old["Timestamp"] = pd.to_datetime(df_old["Timestamp"])
-            df_combined = pd.concat([df_old, df_new], ignore_index=True)
-            df_combined.drop_duplicates(subset=["Timestamp"], keep="last", inplace=True)
-            df_combined.sort_values("Timestamp", inplace=True)
+            try:
+                df_old = pd.read_csv(ruta_csv)
+                df_old["Timestamp"] = pd.to_datetime(df_old["Timestamp"])
+                df_combined = pd.concat([df_old, df_new], ignore_index=True)
+            except Exception:
+                df_combined = df_new
         else:
             df_combined = df_new
+
+        df_combined.drop_duplicates(subset=["Timestamp"], keep="last", inplace=True)
+        df_combined.sort_values("Timestamp", inplace=True)
 
         df_combined["Fecha_Real"] = df_combined["Timestamp"].dt.date
         cols_meta = ["Subestacion", "Max_Diario_MW", "Hora_Pico_Reg"]
@@ -351,33 +353,6 @@ def main_procesamiento():
         RUTA_SALIDA_PARQUET.mkdir(parents=True, exist_ok=True)
 
         ruta_parquet = RUTA_SALIDA_PARQUET / f"{safe_name}_3min.parquet"
-        if "Hora_Real" in df_combined.columns:
-            df_combined["Hora_Real"] = df_combined["Hora_Real"].astype(str)
-        df_combined.to_parquet(ruta_parquet, index=False)
-
-            # Eliminar duplicados (Misma Subestacion y Mismo Timestamp)
-            df_combined.drop_duplicates(subset=["Timestamp"], keep="last", inplace=True)
-            # Ordenar
-            df_combined.sort_values("Timestamp", inplace=True)
-        else:
-            df_combined = df_new_resampled
-
-        # --- CORRECCIÓN FINAL (Unir costuras) ---
-        # Aseguramos que las 00:00 (que venían del día anterior) tomen la metadata del día actual
-        df_combined["Fecha_Real"] = df_combined["Timestamp"].dt.date
-        cols_meta = ["Subestacion", "Max_Diario_MW", "Hora_Pico_Reg"]
-        for col in [c for c in cols_meta if c in df_combined.columns]:
-            df_combined[col] = df_combined.groupby("Fecha_Real")[col].transform("last")
-        # ----------------------------------------
-
-        df_combined.to_csv(ruta_csv, index=False, encoding="utf-8-sig")
-
-        # Guardar también en Parquet (En carpeta separada)
-        RUTA_SALIDA_PARQUET = PROJECT_ROOT / "data" / "SE_Carga_3min_parquet"
-        RUTA_SALIDA_PARQUET.mkdir(parents=True, exist_ok=True)
-
-        ruta_parquet = RUTA_SALIDA_PARQUET / f"{safe_name}_3min.parquet"
-        # Fix PyArrow: Convert time objects to string
         if "Hora_Real" in df_combined.columns:
             df_combined["Hora_Real"] = df_combined["Hora_Real"].astype(str)
         df_combined.to_parquet(ruta_parquet, index=False)

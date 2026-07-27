@@ -36,7 +36,7 @@ def main():
     if st.sidebar.button(
         "🔄 Actualizar Datos CNDC",
         help="Descarga e integra los datos más recientes del CNDC y clima",
-        use_container_width=True,
+        width="stretch",
     ):
         with st.spinner("Actualizando datos del CNDC y clima..."):
             try:
@@ -117,12 +117,12 @@ def main():
             with col_mapa:
                 fig_mapa = charts.crear_mapa_subestaciones(df_resumen)
                 if fig_mapa:
-                    st.plotly_chart(fig_mapa, use_container_width=True)
+                    st.plotly_chart(fig_mapa, width="stretch")
 
             with col_top:
                 fig_top = charts.crear_grafico_top_subestaciones(df_resumen, top_n=10)
                 if fig_top:
-                    st.plotly_chart(fig_top, use_container_width=True)
+                    st.plotly_chart(fig_top, width="stretch")
 
             # Tabla Consolidada
             with st.expander(
@@ -142,7 +142,7 @@ def main():
                             "Último Registro", format="DD MMM YYYY, HH:mm"
                         ),
                     },
-                    use_container_width=True,
+                    width="stretch",
                     height=350,
                 )
 
@@ -219,19 +219,19 @@ def main():
                 fig_doble = charts.crear_grafico_doble_eje(
                     df_carga, df_clima, seleccion, capacidad_mva
                 )
-                st.plotly_chart(fig_doble, use_container_width=True)
+                st.plotly_chart(fig_doble, width="stretch")
 
             with tab_datos:
-                st.subheader("Explorador de Registros (Resolución 3 minutos)")
+                st.subheader("Explorador de Registros")
                 col_search, col_export = st.columns([3, 1])
                 with col_export:
                     csv_data = df_carga.to_csv(index=False, encoding="utf-8-sig")
                     st.download_button(
                         label="📥 Descargar CSV",
                         data=csv_data,
-                        file_name=f"{seleccion}_carga_3min.csv",
+                        file_name=f"{seleccion}_carga_raw.csv",
                         mime="text/csv",
-                        use_container_width=True,
+                        width="stretch",
                     )
 
                 st.dataframe(
@@ -248,7 +248,7 @@ def main():
                         ),
                         "Hora_Pico_Reg": "Hora Pico Registrada",
                     },
-                    use_container_width=True,
+                    width="stretch",
                     height=450,
                 )
 
@@ -262,7 +262,7 @@ def main():
                             "Registros Totales Carga": len(df_carga),
                             "Fecha Inicio": str(df_carga["Timestamp"].min()),
                             "Fecha Cierre": str(df_carga["Timestamp"].max()),
-                            "Resolución Temporal": "3 minutos",
+                            "Modo": "RAW Nativo (Sin Resampleo)",
                         }
                     )
                 with col_d2:
@@ -298,7 +298,7 @@ def main():
 
             fig_comp = charts.crear_grafico_comparativo(dict_subs)
             if fig_comp:
-                st.plotly_chart(fig_comp, use_container_width=True)
+                st.plotly_chart(fig_comp, width="stretch")
         else:
             st.info(
                 "Por favor selecciona al menos una subestación para generar la comparativa."
